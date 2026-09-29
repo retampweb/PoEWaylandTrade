@@ -2,52 +2,33 @@
 set -e
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT="$DIR/poecheck.py"
 
-echo "=== PoE Price Check — install ==="
+echo "=== PoEWaylandTrade — install ==="
 
-# 1. System deps
-echo "[1/4] Checking system dependencies..."
-MISSING=()
-command -v ydotool  &>/dev/null || MISSING+=(ydotool)
-command -v wl-paste &>/dev/null || MISSING+=(wl-clipboard)
-command -v python3  &>/dev/null || MISSING+=(python3)
+echo "[1/4] Installing packages..."
+sudo pacman -S --needed --noconfirm \
+    ydotool wl-clipboard python python-pyqt6 python-requests python-evdev
 
-if [ ${#MISSING[@]} -gt 0 ]; then
-    echo "Installing: ${MISSING[*]}"
-    sudo pacman -S --needed --noconfirm "${MISSING[@]}"
-fi
-
-# 2. Enable ydotoold service
 echo "[2/4] Enabling ydotool daemon..."
-sudo systemctl enable --now ydotool 2>/dev/null || \
-    systemctl --user enable --now ydotool 2>/dev/null || \
-    echo "  (could not enable ydotool service — start it manually: sudo ydotoold &)"
+systemctl --user enable --now ydotool 2>/dev/null || \
+    sudo systemctl enable --now ydotool 2>/dev/null || \
+    echo "  (could not enable ydotool service — start it manually: ydotoold &)"
 
-# Make sure user is in input group (needed for ydotool without sudo)
-if ! groups | grep -q input; then
-    echo "  Adding $USER to input group (re-login required)..."
+echo "[3/4] Keyboard access for the hotkey daemon..."
+if ! id -nG "$USER" | grep -qw input; then
     sudo usermod -aG input "$USER"
+    # grant access right now so a re-login isn't needed for this session
+    sudo setfacl -m "u:$USER:rw" /dev/input/event* /dev/uinput 2>/dev/null || true
+    echo "  Added $USER to 'input' group (permanent after next login)."
 fi
 
-# 3. Python deps
-echo "[3/4] Installing Python dependencies..."
-pip install --user -q -r "$DIR/requirements.txt"
-
-# 4. Make scripts executable
-chmod +x "$SCRIPT" "$DIR/poestash.py" "$DIR/setup_shortcuts.py"
-
-# 5. KDE shortcuts
-echo "[4/4] Setting up KDE shortcuts..."
-python3 "$DIR/setup_shortcuts.py"
+echo "[4/4] Installing hotkey daemon (KDE autostart)..."
+chmod +x "$DIR"/poecheck.py "$DIR"/poestash.py "$DIR"/shortcut_daemon.py
+python3 "$DIR/shortcut_daemon.py" --start
 
 echo ""
 echo "=== Done! ==="
+echo "  Ctrl+Alt+D  — price check (hover an item in game)"
+echo "  Ctrl+Alt+S  — stash valuation"
 echo ""
-echo "IMPORTANT:"
-echo "  1. PoE must run in WINDOWED FULLSCREEN (not exclusive fullscreen)"
-echo "  2. For stash scan, add to config.json:"
-echo "       poesessid   — from browser DevTools → Application → Cookies → pathofexile.com"
-echo "       account_name — auto-detected if poesessid is set"
-echo ""
-echo "Config: ~/.config/poepricecheckwayland/config.json"
+echo "For stash scan set \"poesessid\" in ~/.config/poepricecheckwayland/config.json"

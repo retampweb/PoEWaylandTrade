@@ -11,7 +11,6 @@ DEFAULTS = {
     'league': '',        # empty = auto-detect
     'poesessid': '',
     'account_name': '',  # empty = auto-detect from poesessid
-    'inject_delay_ms': 200,
     'max_listings': 6,
 }
 
@@ -21,7 +20,6 @@ class Config:
     league: str
     poesessid: str
     account_name: str
-    inject_delay_ms: int
     max_listings: int
 
     @classmethod
@@ -45,18 +43,16 @@ class Config:
 
 
 def _detect_account(poesessid: str) -> str:
-    """Follow /my-account redirect to extract account name."""
     try:
-        s = requests.Session()
-        s.cookies.set('POESESSID', poesessid, domain='www.pathofexile.com')
-        s.headers['User-Agent'] = 'poe-price-check-wayland/1.0'
-        resp = s.get('https://www.pathofexile.com/my-account',
-                     allow_redirects=False, timeout=8)
-        loc = resp.headers.get('Location', '')
-        if '/view-profile/' in loc:
-            name = loc.split('/view-profile/')[-1].strip('/')
+        resp = requests.get(
+            'https://www.pathofexile.com/api/profile',
+            cookies={'POESESSID': poesessid}, headers=HEADERS, timeout=8,
+        )
+        resp.raise_for_status()
+        name = resp.json().get('name', '')
+        if name:
             print(f'Auto-detected account: {name}')
-            return name
+        return name
     except Exception as e:
         print(f'Account detection failed: {e}')
     return ''

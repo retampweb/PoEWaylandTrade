@@ -1,5 +1,6 @@
 """PyQt6 overlay window — always-on-top XWayland window with item info + prices."""
-import os, sys, subprocess
+import os, sys, subprocess, json
+from pathlib import Path
 os.environ.setdefault('QT_QPA_PLATFORM', 'xcb')
 
 from PyQt6.QtWidgets import (
@@ -7,8 +8,8 @@ from PyQt6.QtWidgets import (
     QLabel, QPushButton, QFrame,
 )
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QCursor
 
+from qt_common import OVERLAY_FLAGS, EscWatcher
 from ninja import NinjaClient, NINJA_RARITIES
 from trade import TradeClient, Listing
 from parser import ParsedItem
@@ -74,7 +75,7 @@ class FetchThread(QThread):
         item = self.item
 
         if item.rarity in NINJA_RARITIES:
-            price = self.ninja.get_price(item.display_name)
+            price = self.ninja.get_price(item.display_name, item.links)
             if price:
                 div   = price.get('divine_value', 0)
                 chaos = price.get('chaos_value', 0)
@@ -132,12 +133,9 @@ class OverlayWindow(QWidget):
         self.item = item
         self.trade_url = ''
         self._drag_pos = None
+        self._dragged = False
 
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool
-        )
+        self.setWindowFlags(OVERLAY_FLAGS)
         self.setStyleSheet(_STYLE)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
@@ -148,6 +146,10 @@ class OverlayWindow(QWidget):
         self._thread = FetchThread(item, stat_filters, trade, ninja, max_listings)
         self._thread.done.connect(self._on_prices)
         self._thread.start()
+
+        self._esc = EscWatcher()
+        self._esc.pressed.connect(self.close)
+        self._esc.start()
 
     # ---------------------------------------------------------------- layout
 
@@ -241,13 +243,18 @@ class OverlayWindow(QWidget):
     # ---------------------------------------------------------------- helpers
 
     def _place(self):
-        pos = QCursor.pos()
-        screen = QApplication.screenAt(pos) or QApplication.primaryScreen()
-        geo = screen.geometry()
+        # XWayland can't see the cursor over a native Wayland game, so use the
+        # position the user last dragged the overlay to, or the right side.
+        geo = QApplication.primaryScreen().geometry()
         w, h = self.width(), self.height()
-        x = min(pos.x() + 24, geo.right() - w - 8)
-        y = min(pos.y() - h // 3, geo.bottom() - h - 8)
-        y = max(y, geo.top() + 8)
+        saved = _load_pos()
+        if saved:
+            x, y = saved
+        else:
+            x = geo.right() - w - 60
+            y = geo.top() + (geo.height() - h) // 3
+        x = max(geo.left(), min(x, geo.right() - w))
+        y = max(geo.top(), min(y, geo.bottom() - h))
         self.move(x, y)
 
     def _clear_prices(self):
@@ -290,7 +297,8 @@ class OverlayWindow(QWidget):
             self._browser_btn.setEnabled(True)
 
         self.adjustSize()
-        self._place()
+        if not self._dragged:
+            self._place()
 
     def _open_browser(self):
         if self.trade_url:
@@ -311,7 +319,10 @@ class OverlayWindow(QWidget):
         if self._thread.isRunning():
             self._thread.quit()
             self._thread.wait(2000)   # up to 2s, then give up
+        self._esc.stop()
         event.accept()
+        # Tool windows don't count for quitOnLastWindowClosed — quit explicitly
+        QApplication.quit()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:
@@ -326,9 +337,28 @@ class OverlayWindow(QWidget):
     def mouseMoveEvent(self, event):
         if self._drag_pos and event.buttons() == Qt.MouseButton.LeftButton:
             self.move(event.globalPosition().toPoint() - self._drag_pos)
+            self._dragged = True
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
+        if self._dragged:
+            _save_pos(self.x(), self.y())
+
+
+_POS_FILE = Path.home() / '.cache' / 'poepricecheckwayland' / 'overlay_pos.json'
+
+
+def _load_pos() -> tuple[int, int] | None:
+    try:
+        x, y = json.loads(_POS_FILE.read_text())
+        return int(x), int(y)
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _save_pos(x: int, y: int):
+    _POS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _POS_FILE.write_text(json.dumps([x, y]))
 
 
 # ------------------------------------------------------------------ entry

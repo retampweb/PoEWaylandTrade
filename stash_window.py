@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QFont
 
+from qt_common import OVERLAY_FLAGS, EscWatcher
 from stash import StashScanner, StashTab
 from ninja import NinjaClient
 
@@ -130,9 +131,7 @@ class TabDetailDialog(QDialog):
         self.setWindowTitle(f'{tab.name} — {len(tab.items)} items')
         self.setStyleSheet(_STYLE)
         self.setMinimumSize(620, 420)
-        self.setWindowFlags(
-            Qt.WindowType.Dialog | Qt.WindowType.WindowStaysOnTopHint
-        )
+        self.setWindowFlags(OVERLAY_FLAGS)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(10, 10, 10, 10)
@@ -188,17 +187,24 @@ class StashWindow(QWidget):
         self._thread: ScanThread | None = None
         self._div_rate = 0.0
         self._drag_pos = None
+        self._dialog: TabDetailDialog | None = None
 
-        self.setWindowFlags(
-            Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.Tool
-        )
+        self.setWindowFlags(OVERLAY_FLAGS)
         self.setStyleSheet(_STYLE)
         self.setMinimumSize(640, 420)
 
         self._build()
         self._start_scan()
+
+        self._esc = EscWatcher()
+        self._esc.pressed.connect(self._on_esc)
+        self._esc.start()
+
+    def _on_esc(self):
+        if self._dialog:
+            self._dialog.accept()
+        else:
+            self.close()
 
     # ---------------------------------------------------------------- layout
 
@@ -328,8 +334,10 @@ class StashWindow(QWidget):
 
     def _on_row_dclick(self, row: int, _col: int):
         if row < len(self._tabs):
-            dlg = TabDetailDialog(self._tabs[row], self._div_rate, self)
-            dlg.exec()
+            self._dialog = TabDetailDialog(self._tabs[row], self._div_rate, self)
+            self._dialog.move(self.geometry().center() - self._dialog.rect().center())
+            self._dialog.exec()
+            self._dialog = None
 
     def _on_refresh(self):
         if self._thread and self._thread.isRunning():
@@ -349,7 +357,10 @@ class StashWindow(QWidget):
 
     def closeEvent(self, event):
         self._stop_thread()
+        self._esc.stop()
         event.accept()
+        # Tool windows don't count for quitOnLastWindowClosed — quit explicitly
+        QApplication.quit()
 
     def keyPressEvent(self, event):
         if event.key() == Qt.Key.Key_Escape:

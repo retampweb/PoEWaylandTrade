@@ -11,6 +11,21 @@ HEADERS = {
     'Content-Type': 'application/json',
 }
 
+# PoE "Item Class:" → trade API category
+_CATEGORY = {
+    'Rings': 'accessory.ring', 'Amulets': 'accessory.amulet', 'Belts': 'accessory.belt',
+    'Body Armours': 'armour.chest', 'Helmets': 'armour.helmet', 'Gloves': 'armour.gloves',
+    'Boots': 'armour.boots', 'Shields': 'armour.shield', 'Quivers': 'armour.quiver',
+    'Jewels': 'jewel.base', 'Abyss Jewels': 'jewel.abyss',
+    'One Hand Swords': 'weapon.onesword', 'Thrusting One Hand Swords': 'weapon.onesword',
+    'Two Hand Swords': 'weapon.twosword', 'One Hand Axes': 'weapon.oneaxe',
+    'Two Hand Axes': 'weapon.twoaxe', 'One Hand Maces': 'weapon.onemace',
+    'Two Hand Maces': 'weapon.twomace', 'Sceptres': 'weapon.sceptre',
+    'Daggers': 'weapon.dagger', 'Rune Daggers': 'weapon.runedagger',
+    'Claws': 'weapon.claw', 'Bows': 'weapon.bow', 'Staves': 'weapon.staff',
+    'Warstaves': 'weapon.warstaff', 'Wands': 'weapon.wand',
+}
+
 
 @dataclass
 class Listing:
@@ -59,24 +74,26 @@ class TradeClient:
     def _build_query(self, item, stat_filters: list[dict]) -> dict:
         query: dict = {'status': {'option': 'online'}}
 
+        filters: dict = {}
+        category = _CATEGORY.get(item.item_class)
+
         if item.rarity == 'Unique':
             query['name'] = item.name
             query['type'] = item.base_type
-        elif item.rarity == 'Magic':
-            query['type'] = item.base_type
+        elif item.rarity in ('Rare', 'Magic') and category:
+            # search the whole class (any ring), not just this exact base
+            filters['type_filters'] = {'filters': {'category': {'option': category}}}
         else:
             query['type'] = item.base_type
 
         query['stats'] = [{'type': 'and', 'filters': stat_filters}]
 
-        # Optional filters
-        misc: dict = {}
         if item.is_corrupted:
-            misc['corrupted'] = {'option': 'true'}
+            filters['misc_filters'] = {'filters': {'corrupted': {'option': 'true'}}}
         if item.links >= 5:
-            misc['links'] = {'min': item.links}
-        if misc:
-            query['filters'] = {'misc_filters': {'filters': misc}}
+            filters['socket_filters'] = {'filters': {'links': {'min': item.links}}}
+        if filters:
+            query['filters'] = filters
 
         return {'query': query, 'sort': {'price': 'asc'}}
 

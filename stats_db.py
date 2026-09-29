@@ -68,11 +68,11 @@ class StatsDB:
             m = self.match(mod)
             if m:
                 stat_id, value = m
-                results.append({
-                    'id': stat_id,
-                    'value': {'min': value},
-                    'disabled': False,
-                })
+                # exact values almost never match anything; 85% is what APT uses
+                entry = {'id': stat_id, 'disabled': False}
+                if value is not None:
+                    entry['value'] = {'min': int(value * 0.85)}
+                results.append(entry)
         return results
 
     @classmethod

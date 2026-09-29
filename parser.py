@@ -6,7 +6,8 @@ from typing import Optional
 @dataclass
 class ParsedItem:
     rarity: str = ''
-    name: str = ''          # unique/rare name, or item name
+    item_class: str = ''
+    name: str = ''        # unique/rare name, or item name
     base_type: str = ''     # base type line
     item_level: int = 0
     quality: int = 0
@@ -60,7 +61,7 @@ def _is_mod_line(line: str) -> bool:
 
 
 def _clean_mod(line: str) -> str:
-    line = re.sub(r'\s*\((augmented|crafted|fractured)\)', '', line)
+    line = re.sub(r'\s*\((augmented|crafted|fractured|implicit|enchant)\)', '', line)
     line = re.sub(r'\{[^}]+\}\s*', '', line)
     return line.strip()
 
@@ -85,6 +86,11 @@ def parse_item(text: str) -> Optional[ParsedItem]:
 
     # --- Header section ---
     header = [l.strip() for l in sections[0].splitlines() if l.strip()]
+    # Current PoE prepends "Item Class: ..." before the Rarity line
+    while header and not header[0].startswith('Rarity:'):
+        m = re.match(r'Item Class:\s+(.+)', header.pop(0))
+        if m:
+            item.item_class = m.group(1).strip()
     if not header:
         return None
 
